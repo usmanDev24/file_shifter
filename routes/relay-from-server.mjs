@@ -12,8 +12,8 @@ import cookieParser from "../model/cookie_parser.mjs";
 import { memtype } from "../model/memtype.mjs";
 
 export const emitter = new EventEmitter();
-export let State = Object.create(null)
-export let liveSendDevices = new Map();
+export let LiveSendState = Object.create(null) // Containing live shared Files metadata with sharing device ID.
+export const linkedDevices = new Map(); // Devices linked to each other with one live sharing ohter.
 
 export function getId(req) {
   let data = cookieParser(req.headers.cookie);
@@ -24,16 +24,16 @@ export function getName(req) {
   return data.devicename;
 }
 
-let STREAMS = Object.create(null)
-let sharingDeives = new Set();
+let STREAMS = Object.create(null)  // Passthrouh streams
+let liveSendDevices = new Set(); // Devices on which live send page is active
 
 addRoute("/relay-from-server/file-meta-data", async (req, res) => {
   req.setEncoding("utf-8");
   const deviceID = getId(req);
-  State[deviceID] = Object.create(null);
-  State[deviceID].name = getName(req)
+  LiveSendState[deviceID] = Object.create(null);
+  LiveSendState[deviceID].name = getName(req)
 
-  liveSendDevices.set(deviceID, req.headers["devicetosend"])
+  linkedDevices.set(deviceID, req.headers["devicetosend"])
 
   STREAMS[deviceID] = Object.create(null)
   let metaData = "";
@@ -49,7 +49,7 @@ addRoute("/relay-from-server/file-meta-data", async (req, res) => {
 });
 
 function addLinksRouts(deviceID, metaData) {
-  let allFilesObj = Object.create(null);
+  let filesObj = Object.create(null);
   for (let file of metaData) {
     file.name = file["name"].replaceAll(/\/|\\/ig, "_")
     const url = `/relay-from-server/file?name=${encodeURIComponent(file.name)}$device-id=${encodeURIComponent(deviceID)}`;
@@ -62,24 +62,25 @@ function addLinksRouts(deviceID, metaData) {
     fileInfo.link = url;
     fileInfo.downloading = 0
 
-    allFilesObj[fileKey] = fileInfo;
+    filesObj[fileKey] = fileInfo;
     STREAMS[deviceID][fileKey] = null;
 
     addRoute(url, async (req, res) => {
-      const file = allFilesObj[fileKey]
+      const file = filesObj[fileKey]
       let stream = STREAMS[deviceID][fileKey]
 
       if (!stream) {
         stream = await makeDownloadAble(deviceID, fileKey);
         if (stream === "busy") {
-          res.end("Servr Busy")
+          res.end("<html><body><h1>Sharing Device is Busy</h1></body></html>")
           return;
         }
         stream = STREAMS[deviceID][fileKey]
       } 
       const type = memtype(file.name);
+      let filename=`${file["name"].slice(0, file["name"].lastIndexOf("("))}`;
       res.writeHead(200, "OK", {
-        "content-disposition": `attachment; filename=${file["name"].slice(0, file["name"].lastIndexOf("("))}`,
+        "content-disposition": `attachment; filename=${filename}`,
         "content-type": type,
         "content-length": file.size
       });
@@ -118,8 +119,8 @@ function addLinksRouts(deviceID, metaData) {
       })
     });
   }
-  State[deviceID].filesObj = allFilesObj;
-  emitter.emit("newLiveShare", deviceID, State[deviceID])
+  LiveSendState[deviceID].filesObj = filesObj;
+  emitter.emit("newLiveShare", deviceID, LiveSendState[deviceID])
 }
 
 async function makeDownloadAble(deviceID, file) {
@@ -155,13 +156,13 @@ addRoute("/relay-from-server/to-send", async (req, res) => {
   req.on("close", () => {
     emitter.removeListener("makeDownloadAble", listner);
     cleanupRouts(deviceID);
-    State[deviceID] = null
+    LiveSendState[deviceID] = null
   })
 });
 function cleanupRouts(deviceID) {
-  if (!State[deviceID]) return;
+  if (!LiveSendState[deviceID]) return;
   emitter.emit("update", deviceID)
-  const fileInfo = State[deviceID]["filesObj"];
+  const fileInfo = LiveSendState[deviceID]["filesObj"];
   for (let file of Object.values(fileInfo)) {
     removeRouts(file.link);
   }
@@ -200,7 +201,7 @@ function emitUpdate(event, sendID, receiveID, key, status) {
 
 addRoute("/relay-from-server/status", (req, res) => {
   const deviceID = getId(req);
-  sharingDeives.add(deviceID)
+  liveSendDevices.add(deviceID)
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -214,7 +215,7 @@ addRoute("/relay-from-server/status", (req, res) => {
   emitter.on("update", listner);
   req.on("close", () => {
     emitter.removeListener("update", listner);
-    sharingDeives.delete(deviceID)
+    liveSendDevices.delete(deviceID)
   });
 });
 
@@ -226,7 +227,7 @@ function calcSize(size) {
 
 addRoute('/live-send', async (req, res, isServer) => {
   const deviceID = getId(req);
-  if (sharingDeives.has(deviceID)) {
+  if (liveSendDevices.has(deviceID)) {
     res.writeHead(200, 'Ok', {
       'content-type': 'text/html',
       'cache-control': 'no-cache'

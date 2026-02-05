@@ -5,18 +5,15 @@
 //--------------------------------------------------------------------------------------
 
 import { addRoute } from "./addRoute.mjs";
-import { State as liveShared } from "./relay-from-server.mjs";
+import { LiveSendState  } from "./relay-from-server.mjs";
 import { emitter as liveEmitter } from "./relay-from-server.mjs";
-import { getId, getName, liveSendDevices } from "./relay-from-server.mjs";
+import { getId, getName, linkedDevices } from "./relay-from-server.mjs";
 import { serverFile } from "../model/serveStatic.mjs";
 
 let receivingDevices = new Set()
 class State {
   constructor() {
-    this.liveShared = liveShared;
-    this.byPcShared;
-    this.serverShared;
-    this.byPcPasswords;
+    this.liveShared = LiveSendState;
   }
   init() {
 
@@ -26,10 +23,11 @@ class State {
         "Cache-Control": "no-cache",
         "content-type": "application/json"
       });
+      
       let allShared = Object.create(null)
       let liveShared = Object.create(null);
       Object.keys(this.liveShared).forEach(key => {
-        if (reqID === liveSendDevices.get(key)) liveShared[key] = this.liveShared[key]
+        if (reqID === linkedDevices.get(key)) liveShared[key] = this.liveShared[key]
       })
       allShared["liveShared"] = liveShared;
       res.end(JSON.stringify(allShared));
@@ -43,10 +41,10 @@ class State {
         "connection": "keep-alive",
         "content-type": "text/event-stream"
       })
-      function liveSharelistner(id, obj) {
-        if (reqID != liveSendDevices.get(id)) return;
+      function liveSharelistner(sendId, fileObj) {
+        if (reqID != linkedDevices.get(sendId)) return;
         let toSend = Object.create(null);
-        toSend[id] = obj;
+        toSend[sendId] = fileObj;
         res.write(`event: newLiveShare\ndata: ${JSON.stringify(toSend)}\n\n`)
       }
       liveEmitter.on("newLiveShare", liveSharelistner);
