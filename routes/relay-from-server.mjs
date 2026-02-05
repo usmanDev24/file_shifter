@@ -80,7 +80,7 @@ function addLinksRouts(deviceID, metaData) {
       const type = memtype(file.name);
       let filename=`${file["name"].slice(0, file["name"].lastIndexOf("("))}`;
       res.writeHead(200, "OK", {
-        "content-disposition": `attachment; filename=${filename}`,
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
         "content-type": type,
         "content-length": file.size
       });
