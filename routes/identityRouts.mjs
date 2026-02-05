@@ -11,6 +11,7 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import * as crpto from "node:crypto";
 
+// this fuction create a Id using req header data not perfect way. I will change it
 export function createHeaderId(req) {
   const ua = req.headers["user-agent"] || "";
   const accept = req.headers["accept"] || "";
@@ -29,19 +30,12 @@ export function createHeaderId(req) {
     acceptLang,
     acceptEnc,
   ].join("|");
-  console.log(components);
+  
   const hash = crpto.createHash("sha256").update(components).digest("hex");
-  console.log(hash);
+
   return hash;
 }
-function generate4digitID() {
-  let id = "";
-  for (let v = 0; v < 4; v++) {
-    let n = String(Math.floor(Math.random() * 10));
-    id += n;
-  }
-  return id;
-}
+
 addRoute("/set-device-id", async (req, res) => {
   await varifyDir("appData");
   await varifyFile("appData", "devicesData.json");
@@ -56,7 +50,7 @@ addRoute("/set-device-id", async (req, res) => {
   if (existingId) {
     let deviceName = devicesData[hid].name;
     deviceName = deviceName.slice(0, deviceName.indexOf("("));
-    deviceName = deviceName + `(${generate4digitID()})`;
+    deviceName = deviceName + `(${crpto.randomInt(1000, 9000)})`;
 
     res.setHeader("set-cookie", [
       `deviceid=${hid}; httponly; path=/; max-age=${60 * 60 * 24 * 365}`,
@@ -88,9 +82,9 @@ addRoute("/set-device-name", async (req, res) => {
     "set-cookie",
     `devicename=${reqDeviceName}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24 * 365}`
   );
+  await fs.writeFile(filePath, JSON.stringify(devicesData), "utf-8");
   res.end("done");
 
-  await fs.writeFile(filePath, JSON.stringify(devicesData), "utf-8");
 });
 
 addRoute("/clear-cookie", (req, res) => {

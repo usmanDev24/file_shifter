@@ -21,8 +21,8 @@ export const server = http.createServer(async (req, res) => {
 
   for (let route of routes) {
     if (req.url === route.url) {
-      const next = await identityCheck(req, res);
-      if (next) {
+      const identified = await identityCheck(req, res);
+      if (identified) {
         addToConnected(req, res);
         await route.handler(req, res, isServer);
       }
@@ -58,9 +58,18 @@ async function identityCheck(req, res) {
   if (allowedRouts.includes(req.url)) return true;
   const cookie = cookieParser(req.headers.cookie);
   if (!cookie) {
+    /*
+      No cookie found, varification.html make fetch req to "/set-device-id"
+      see identityRouts.mjs to know what "/set-device-id" does.
+    */
     await serverFile(req, res, "public", "varification.html");
     return false;
+
   } else if (!cookie.devicename) {
+    /*
+      device-name.html will get name form user and
+      make fetch req to "/set-device-name".
+    */
     await serverFile(req, res, "public", "device-name.html");
     return false;
   }
