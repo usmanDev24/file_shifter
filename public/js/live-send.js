@@ -1,268 +1,257 @@
-//-------------------------------------------------------------------------------------
-//   GNU GENERAL PUBLIC LICENSE  Version 3, 29 June 2007. see Licence file for detail.
-//
-//                Copyright (c) 2025 Usman Ghani (usmandev24) 
-//--------------------------------------------------------------------------------------
+/**
+ * UI & DOM Registry
+ * Consolidating references prevents "spaghetti" lookups throughout the logic.
+ */
+const DOM = {
+  fileInput: document.getElementById("file-input"),
+  showFiles: document.getElementById("show-files"),
+  deviceSelect: document.getElementById("select"),
+  selectSkeleton: document.getElementById("select-skeleton"),
+  cancelBtn: document.getElementById("cancel-btn"),
+};
 
-let memtype;
-const file_input = document.getElementById("file-input");
-const show_files = document.getElementById("show-files");
-const select = document.getElementById("select");
-const selectSkeleton = document.getElementById("select-skeleton")
-const canclebtn = document.getElementById("cancel-btn")
+// Global State
+let memtypeModule;
+let targetDeviceId;
 const connectedDevices = new EventSource("/connected-devices");
 
-const emitter = new EventTarget();
-let DeviceToSend;
-file_input.onchange = liveShare
+/**
+ * Utilities: Logic extracted for DRY (Don't Repeat Yourself)
+ */
+const utils = {
+  cleanFileName: (name) => name.replaceAll(/\/|\\/ig, "_"),
+  
+  formatSize: (bytes) => {
+    const mb = bytes / (1024 * 1024);
+    return mb < 1 
+      ? `${(bytes / 1024).toFixed(2)}KB` 
+      : `${mb.toFixed(2)}MB`;
+  },
 
+  createEl: (tag, props = {}, ...children) => {
+    const element = document.createElement(tag);
+    Object.assign(element, props);
+    children.forEach(child => {
+      element.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+    });
+    return element;
+  }
+};
+
+/**
+ * Initialization Logic
+ */
 window.onload = init;
+DOM.fileInput.onchange = handleLiveShare;
 
 async function init() {
-  await getMemtype();
-  let allOptions = new Map();
-  connectedDevices.addEventListener("devices", event => {
-    const data = JSON.parse(event.data); 
-    for (let key of Object.keys(data)) {
-      let option = document.createElement("option");
-      allOptions.set(key, option)
-      option.textContent = data[key];
-      option.value = key;
-      selectSkeleton.before(option)
-    }
-  })
+  await loadMemtype();
+  const optionsMap = new Map();
 
-  connectedDevices.addEventListener("newDevice", event => {
-    const data = JSON.parse(event.data); 
-    for (let key of Object.keys(data)) {
-      if (allOptions.has(key)) {
-        let option = allOptions.get(key)
-        option.textContent = data[key]
-        return;
+  // Pattern: Observer - Handling device updates
+  const updateDeviceList = (event) => {
+    const data = JSON.parse(event.data);
+    Object.entries(data).forEach(([id, name]) => {
+      if (optionsMap.has(id)) {
+        optionsMap.get(id).textContent = name;
+      } else {
+        const option = utils.createEl("option", { value: id, textContent: name });
+        optionsMap.set(id, option);
+        DOM.selectSkeleton.before(option);
       }
-      const option = document.createElement("option");
-      allOptions.set(key, option)
-      option.textContent = data[key];
-      option.value = key;
-      selectSkeleton.before(option)
-    }
-  })
-
-  select.onchange = () => {
-    for (let option of Array.from(select.options)) {
-      if (option.selected) DeviceToSend = option.value;
-    }
-    file_input.disabled = false;
-  }
-}
-
-async function getMemtype() {
-  if (!memtype) {
-    memtype = await import('/public/js/memtype.js');
-  }
-}
-async function liveShare() {
-  file_input.disabled = true;
-  select.disabled = true;
-  connectedDevices.close();
-  const deviceName = localStorage.getItem("deviceName").replaceAll("-", "_")
-  show_files.style.display = "block";
-  canclebtn.style.display = "block"
-  const app = new Share(file_input, deviceName, DeviceToSend);
-  await app.init();
-  window.onbeforeunload = app.close.bind(app)
-}
-
-class Share {
-  constructor(fileInput, deviceName, toSend) {
-    this.fileInput = fileInput;
-    this.deviceName = deviceName;
-    this.DeviceToSend = toSend;
-    this.statusSource = new EventSource("/relay-from-server/status");
-    this.filetoSend = new EventSource("/relay-from-server/to-send");
-    this.allFileObjs = {};
-    this.sendingCount = 0;
-    this.matadata = []
-  }
-
-  async init() {
-    const fileInput = this.fileInput
-    Array.from(fileInput.files).forEach(async (file, index) => {
-      const fileObj = new File(file, "pending");
-      const fileName = file["name"].replaceAll(/\/|\\/ig, "_")
-      const fileSize = calcSize(file.size)
-      this.matadata.push({ name: fileName, size: file.size })
-      const key = file.size + fileName
-      this.allFileObjs[key] = fileObj;
     });
-    this.addListeners()
-    await this.sendMetaData()
+  };
+
+  connectedDevices.addEventListener("devices", updateDeviceList);
+  connectedDevices.addEventListener("newDevice", updateDeviceList);
+
+  DOM.deviceSelect.onchange = () => {
+    const selected = Array.from(DOM.deviceSelect.options).find(opt => opt.selected);
+    if (selected) {
+      targetDeviceId = selected.value;
+      DOM.fileInput.disabled = false;
+    }
+  };
+}
+
+async function loadMemtype() {
+  if (!memtypeModule) {
+    memtypeModule = await import('/public/js/memtype.js');
+  }
+}
+
+/**
+ * Orchestrator Class
+ * Manages the file transfer lifecycle.
+ */
+class ShareController {
+  constructor(fileInput, deviceName, recipientId) {
+    this.files = Array.from(fileInput.files);
+    this.deviceName = deviceName;
+    this.recipientId = recipientId;
+    this.statusSource = new EventSource("/relay-from-server/status");
+    this.queueSource = new EventSource("/relay-from-server/to-send");
+    
+    this.fileRegistry = {};
+    this.activeTransferCount = 0;
+    this.metadataQueue = [];
   }
 
-  async sendMetaData() {
-    let res = await fetch("/relay-from-server/file-meta-data", {
+  async start() {
+    this.files.forEach(file => {
+      const cleanName = utils.cleanFileName(file.name);
+      const registryKey = file.size + cleanName;
+      
+      const fileInstance = new FileTransfer(file);
+      this.fileRegistry[registryKey] = fileInstance;
+      this.metadataQueue.push({ name: cleanName, size: file.size });
+    });
+
+    this.setupListeners();
+    await this.transmitMetadata();
+  }
+
+  setupListeners() {
+    this.queueSource.addEventListener("tosend", async (event) => {
+      // Constraint: Limit concurrent uploads to prevent network congestion
+      if (this.activeTransferCount >= 2) return;
+
+      this.activeTransferCount++;
+      const fileKey = event.data;
+      if (this.fileRegistry[fileKey]) {
+        await this.fileRegistry[fileKey].upload();
+      }
+      this.activeTransferCount = Math.max(0, this.activeTransferCount - 1);
+    });
+
+    this.statusSource.addEventListener("update", (event) => {
+      const data = JSON.parse(event.data);
+      const key = Object.keys(data)[0];
+      if (this.fileRegistry[key]) {
+        this.fileRegistry[key].updateUI(data[key]);
+      }
+    });
+  }
+
+  async transmitMetadata() {
+    const response = await fetch("/relay-from-server/file-meta-data", {
       method: "POST",
-      body: JSON.stringify(this.matadata),
-      headers: {
-        "devicetosend": this.DeviceToSend
-      }
-    })
-    return await res.text()
+      body: JSON.stringify(this.metadataQueue),
+      headers: { "devicetosend": this.recipientId }
+    });
+    return response.text();
   }
 
-  addListeners() {
-    this.filetoSend.addEventListener("tosend", async event => {
-      this.sendingCount += 1; 
-      if (this.sendingCount > 2) {
-        return;
-      }
-      const tosend = event.data 
-      const res = await this.allFileObjs[tosend].liveSend();
-      if (this.sendingCount > 0) this.sendingCount -= 1;
-    })
-    this.statusSource.addEventListener("update", event => {
-      const obj = JSON.parse(event.data)
-      const key = Object.keys(obj)[0];
-      this.allFileObjs[key].update(obj[key]);
-    })
-  }
-
-  async close() {
+  async terminate() {
     if (confirm("Do you want to cancel Live Sending?")) {
       this.statusSource.close();
-      this.filetoSend.close();
+      this.queueSource.close();
     }
   }
 }
 
-class File {
-  constructor(file, status = "") {
+/**
+ * File Entity Class
+ * Manages individual file state and UI representation.
+ */
+class FileTransfer {
+  constructor(file) {
     this.file = file;
-    this.status = status;
-    this.ui = createFileUi(file);
-    this.count = 0;
+    this.completionCount = 0;
+    this.ui = this.buildUI();
   }
 
-  update(status) {
-    const ui = this.ui;
-    this.status = status;
+  buildUI() {
+    const cleanName = utils.cleanFileName(this.file.name);
+    const sizeStr = utils.formatSize(this.file.size);
+    const emoji = memtypeModule.addEmoji(cleanName);
+
+    const loading = utils.createEl("span", { className: "loading loading-dots" });
+    const progress = utils.createEl("div", { 
+      className: "radial-progress text-info", 
+      style: "display: none; --value:70; --size:1.3rem;" 
+    });
+    const statusText = utils.createEl("span", { className: "w-max text-[0.8rem] md:text-[1rem]" });
+
+    const container = utils.createEl("div", 
+      { className: "flex flex-col gap-1 w-full p-2 mt-3 shadow-sm rounded-lg" },
+      utils.createEl("div", { className: "flex w-full justify-between break-all items-center" },
+        utils.createEl("h3", { 
+          className: "text-[0.85rem] font-bold", 
+          textContent: `${emoji}${cleanName} (${sizeStr})` 
+        }),
+        utils.createEl("div", { className: "ml-auto pl-2 flex gap-2" }, loading, progress, statusText)
+      )
+    );
+
+    DOM.showFiles.appendChild(container);
+
+    return { loading, progress, statusText };
+  }
+
+  updateUI(status) {
+    const { loading, progress, statusText } = this.ui;
+
+    const setDisplay = (el, val) => el.style.display = val;
+
     switch (status) {
       case "pending":
-        this.setDisplay(ui.loading, "inline-block");
-        this.setDisplay(ui.statusText, "none");
-        this.setDisplay(ui.progress, "none")
+        setDisplay(loading, "inline-block");
+        setDisplay(statusText, "none");
+        setDisplay(progress, "none");
         break;
       case "sending":
-        this.setDisplay(ui.loading, "inline-block");
-        this.setText(ui.statusText, " sending");
+        setDisplay(loading, "inline-block");
+        statusText.textContent = " sending";
         break;
       case "completed":
-        this.count += 1;
-        this.setDisplay(ui.loading, "none");
-        this.setDisplay(ui.progress, "none")
-        if (this.count > 1) {
-          this.setText(ui.statusText, `${this.count} times ✅`);
-        } else {
-          this.setText(ui.statusText, `✅`);
-        }
-
+        this.completionCount++;
+        setDisplay(loading, "none");
+        setDisplay(progress, "none");
+        statusText.textContent = this.completionCount > 1 ? `${this.completionCount} times ✅` : "✅";
         break;
       case "Canceled":
-        this.setDisplay(ui.loading, "none");
-        this.setDisplay(ui.progress, "none");
-        this.setText(ui.statusText, "⚠️ canceled");
+        setDisplay(loading, "none");
+        setDisplay(progress, "none");
+        statusText.textContent = "⚠️ canceled";
         break;
-      default:
-        this.setDisplay(ui.loading, "none");
-        this.setDisplay(ui.progress, "inline-block")
-        ui.progress.style.setProperty("--value", status)
-        this.setText(ui.statusText, " " + status + "%");
+      default: // Progress percentage
+        setDisplay(loading, "none");
+        setDisplay(progress, "inline-block");
+        progress.style.setProperty("--value", status);
+        statusText.textContent = ` ${status}%`;
     }
   }
-  async liveSend() {
+
+  async upload() {
     try {
-      const file = this.file;
-      const filename = file["name"].replaceAll(/\/|\\/ig, "_")
       const res = await fetch('/relay-from-server/make', {
         method: "POST",
-        body: file,
+        body: this.file,
         headers: {
-          "filename": filename,
-          "filesize": file.size
+          "filename": utils.cleanFileName(this.file.name),
+          "filesize": this.file.size
         }
       });
-      const textRes = await res.text()
-      return textRes;
+      return await res.text();
     } catch (error) {
-      return "Closed"
+      console.error("Upload failed", error);
+      return "Closed";
     }
-
-  }
-  setDisplay(ele, value) {
-    ele.style.display = value;
-  }
-  setText(ele, text) {
-    ele.textContent = text;
-  }
-}
-function createFileUi(file) {
-  //Dom Elements ;
-  const oneFileSet = el("div", {
-    className:
-      "flex flex-col gap-1  w-full p-2 mt-3 shadow shadow-sm dark:shadow-md rounded-lg ",
-  });
-  const nameRow = el("div", {
-    className: "flex w-full justify-between  break-all items-center",
-  });
-  const nameText = document.createElement("h3");
-  nameText.className = "text-[0.85rem] font-bold";
-  const loading = el("span", {
-    className: " loading loading-dots"
-  })
-  const progress = el("div", {
-    className: "radial-progress text-info ",
-    ariaValueNow: "70",
-    role: "progressbar"
-  })
-  progress.setAttribute(
-    "style",
-    "--value:70; --size:1.3rem;"
-  );
-  progress.style.display = "none"
-  const statusText = el("span", {
-    className: "w-max  text-[0.8rem] md:text-[1rem]",
-  }, "");
-  const loadStatDiv = el("div", {
-    className: "ml-auto pl-2  flex justify-between align-center-safe gap-2"
-  }, loading, progress, statusText,)
-
-  let fileSize = calcSize(file.size)
-
-  nameRow.appendChild(nameText);
-  nameRow.appendChild(loadStatDiv);
-  const filename = file["name"].replaceAll(/\/|\\/ig, "_")
-  nameText.textContent = memtype.addEmoji(filename) + filename + `(${fileSize})`;
-  oneFileSet.appendChild(nameRow);
-  show_files.appendChild(oneFileSet);
-  return {
-    oneFileSet, nameRow, nameText, loadStatDiv, statusText, loading, progress
   }
 }
 
-function el(tag, props = {}, ...children) {
-  const e = document.createElement(tag);
-  Object.assign(e, props);
-  children.forEach((c) => {
-    if (typeof c === "string") {
-      e.appendChild(document.createTextNode(c));
-    } else e.appendChild(c);
-  });
-  return e;
+async function handleLiveShare() {
+  DOM.fileInput.disabled = true;
+  DOM.deviceSelect.disabled = true;
+  connectedDevices.close();
 
-}
-function calcSize(size) {
-  let fileSize = (size / (1024 * 1024)).toFixed(2) + "MB";
-  if (size / (1024 * 1024) < 1)
-    fileSize = (size / 1024).toFixed(2) + "KB";
-  return fileSize
+  const deviceName = (localStorage.getItem("deviceName") || "unknown").replaceAll("-", "_");
+  DOM.showFiles.style.display = "block";
+  DOM.cancelBtn.style.display = "block";
+
+  const controller = new ShareController(DOM.fileInput, deviceName, targetDeviceId);
+  await controller.start();
+  
+  window.onbeforeunload = () => controller.terminate();
 }

@@ -55,8 +55,7 @@ class FilesContainer {
   static create(id, obj, method) {
     const containerObj = new FilesContainer(id, obj, method);
     show_files.appendChild(containerObj.dom);
-    if (obj["filesObj"] === "locked") containerObj.renderLock();
-    else containerObj.renderFiles();
+    containerObj.renderFiles();
     containerObj.attchEvents();
     return containerObj;
   }
