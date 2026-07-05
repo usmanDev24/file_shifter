@@ -1,7 +1,7 @@
 //-------------------------------------------------------------------------------------
 //   GNU GENERAL PUBLIC LICENSE  Version 3, 29 June 2007. see Licence file for detail.
 //
-//                Copyright (c) 2025 Usman Ghani (usmandev24) 
+//                Copyright (c) 2025 Usman Ghani (usmandev24)
 //--------------------------------------------------------------------------------------
 
 import { addRoute } from "./addRoute.mjs";
@@ -30,7 +30,7 @@ export function createHeaderId(req) {
     acceptLang,
     acceptEnc,
   ].join("|");
-  
+
   const hash = crpto.createHash("sha256").update(components).digest("hex");
 
   return hash;
@@ -47,21 +47,33 @@ addRoute("/set-device-id", async (req, res) => {
   const hid = createHeaderId(req);
   const existingId = Object.keys(devicesData).find((id) => id === hid);
 
-  if (existingId) {
-    let deviceName = devicesData[hid].name;
-    deviceName = deviceName.slice(0, deviceName.indexOf("("));
-    deviceName = deviceName + `(${crpto.randomInt(1000, 9000)})`;
 
-    res.setHeader("set-cookie", [
-      `deviceid=${hid}; httponly; path=/; max-age=${60 * 60 * 24 * 365}`,
-      `devicename=${deviceName}; httponly; path=/; max-age=${60 * 60 * 24 * 365}`,
-    ]);
+  if (existingId) {
+    let deviceName = devicesData[hid]?.name || "Unknown";
+    const openParenIndex = deviceName.indexOf("(");
+    if (openParenIndex !== -1) {
+      deviceName = deviceName.slice(0, openParenIndex).trim();
+    }
+    deviceName = `${deviceName}(${crpto.randomInt(1000, 9000)})`;
+
+    // 2. FIX: Use appendHeader sequentially to guarantee isolated header lines.
+    res.appendHeader(
+      "Set-Cookie",
+      `deviceid=${encodeURIComponent(hid)}; SameSite=Lax; HttpOnly; Path=/; Max-Age=${60 * 60 * 24 * 365}`,
+    );
+    res.appendHeader(
+      "Set-Cookie",
+      `devicename=${encodeURIComponent(deviceName)}; SameSite=Lax; HttpOnly; Path=/; Max-Age=${60 * 60 * 24 * 365}`,
+    );
+
     res.end(JSON.stringify({ status: "ok", name: deviceName }));
   } else {
-    res.setHeader(
-      "set-cookie",
-      `deviceid=${hid}; httponly; path=/; max-age=${60 * 60 * 24 * 365}`
+    // 3. FIX: Standardize with appendHeader for structural uniformity across the lifecycle
+    res.appendHeader(
+      "Set-Cookie",
+      `deviceid=${encodeURIComponent(hid)}; SameSite=Lax; HttpOnly; Path=/; Max-Age=${60 * 60 * 24 * 365}`,
     );
+
     res.end(JSON.stringify({ status: "new" }));
   }
 });
@@ -80,11 +92,10 @@ addRoute("/set-device-name", async (req, res) => {
   devicesData[cookie.deviceid] = { name: reqDeviceName };
   res.setHeader(
     "set-cookie",
-    `devicename=${reqDeviceName}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24 * 365}`
+    `devicename=${reqDeviceName}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24 * 365}`,
   );
   await fs.writeFile(filePath, JSON.stringify(devicesData), "utf-8");
   res.end("done");
-
 });
 
 addRoute("/clear-cookie", (req, res) => {
