@@ -30,9 +30,19 @@ const utils = {
 
   createEl: (tag, props = {}, ...children) => {
     const element = document.createElement(tag);
-    Object.assign(element, props);
+    // BUG FIX: Separate 'style' from plain properties because Object.assign() 
+    // cannot write a plain string directly to element.style in modern DOM APIs.
+    const { style, ...otherProps } = props;
+    Object.assign(element, otherProps);
+    
+    if (style) {
+      element.style.cssText = style;
+    }
+
     children.forEach(child => {
-      element.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+      if (child) {
+        element.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+      }
     });
     return element;
   }
@@ -50,16 +60,22 @@ async function init() {
 
   // Pattern: Observer - Handling device updates
   const updateDeviceList = (event) => {
-    const data = JSON.parse(event.data);
-    Object.entries(data).forEach(([id, name]) => {
-      if (optionsMap.has(id)) {
-        optionsMap.get(id).textContent = name;
-      } else {
-        const option = utils.createEl("option", { value: id, textContent: name });
-        optionsMap.set(id, option);
-        DOM.selectSkeleton.before(option);
-      }
-    });
+    try {
+      const data = JSON.parse(event.data);
+      Object.entries(data).forEach(([id, name]) => {
+        if (optionsMap.has(id)) {
+          optionsMap.get(id).textContent = name;
+        } else {
+          const option = utils.createEl("option", { value: id, textContent: name });
+          optionsMap.set(id, option);
+          if (DOM.selectSkeleton) {
+            DOM.selectSkeleton.before(option);
+          }
+        }
+      });
+    } catch (err) {
+      console.error("Failed to parse device list update:", err);
+    }
   };
 
   connectedDevices.addEventListener("devices", updateDeviceList);
@@ -67,7 +83,7 @@ async function init() {
 
   DOM.deviceSelect.onchange = () => {
     const selected = Array.from(DOM.deviceSelect.options).find(opt => opt.selected);
-    if (selected) {
+    if (selected && selected.value) {
       targetDeviceId = selected.value;
       DOM.fileInput.disabled = false;
     }
@@ -76,7 +92,11 @@ async function init() {
 
 async function loadMemtype() {
   if (!memtypeModule) {
-    memtypeModule = await import('/public/js/memtype.js');
+    try {
+      memtypeModule = await import('/public/js/memtype.js');
+    } catch (err) {
+      console.error("Critical error loading memtype module:", err);
+    }
   }
 }
 
@@ -116,36 +136,63 @@ class ShareController {
       // Constraint: Limit concurrent uploads to prevent network congestion
       if (this.activeTransferCount >= 2) return;
 
-      this.activeTransferCount++;
       const fileKey = event.data;
-      if (this.fileRegistry[fileKey]) {
+      if (!this.fileRegistry[fileKey]) return;
+
+      try {
+        this.activeTransferCount++;
         await this.fileRegistry[fileKey].upload();
+      } catch (error) {
+        console.error(`Error transferring file ${fileKey}:`, error);
+      } finally {
+        // BUG FIX: Wrapped in try...finally to guarantee the counter decrements 
+        // even if the HTTP connection drops or throws an unexpected exception.
+        this.activeTransferCount = Math.max(0, this.activeTransferCount - 1);
       }
-      this.activeTransferCount = Math.max(0, this.activeTransferCount - 1);
     });
 
     this.statusSource.addEventListener("update", (event) => {
-      const data = JSON.parse(event.data);
-      const key = Object.keys(data)[0];
-      if (this.fileRegistry[key]) {
-        this.fileRegistry[key].updateUI(data[key]);
+      try {
+        const data = JSON.parse(event.data);
+        const key = Object.keys(data)[0];
+        if (this.fileRegistry[key]) {
+          this.fileRegistry[key].updateUI(data[key]);
+        }
+      } catch (err) {
+        console.error("Failed processing status update:", err);
       }
     });
   }
 
   async transmitMetadata() {
-    const response = await fetch("/relay-from-server/file-meta-data", {
-      method: "POST",
-      body: JSON.stringify(this.metadataQueue),
-      headers: { "devicetosend": this.recipientId }
-    });
-    return response.text();
+    try {
+      const response = await fetch("/relay-from-server/file-meta-data", {
+        method: "POST",
+        body: JSON.stringify(this.metadataQueue),
+        headers: { 
+          "Content-Type": "application/json",
+          "devicetosend": this.recipientId 
+        }
+      });
+      return await response.text();
+    } catch (err) {
+      console.error("Failed transmitting metadata:", err);
+    }
   }
 
-  async terminate() {
+  terminate() {
     if (confirm("Do you want to cancel Live Sending?")) {
       this.statusSource.close();
       this.queueSource.close();
+      
+      // Clean up UI visibility state
+      DOM.showFiles.style.display = "none";
+      DOM.cancelBtn.style.display = "none";
+      DOM.fileInput.disabled = false;
+      DOM.deviceSelect.disabled = false;
+      
+      // Reload page context to cleanly re-establish SSE listeners if desired
+      window.location.reload();
     }
   }
 }
@@ -164,23 +211,25 @@ class FileTransfer {
   buildUI() {
     const cleanName = utils.cleanFileName(this.file.name);
     const sizeStr = utils.formatSize(this.file.size);
-    const emoji = memtypeModule.addEmoji(cleanName);
+    const emoji = memtypeModule && typeof memtypeModule.addEmoji === "function" 
+      ? memtypeModule.addEmoji(cleanName) 
+      : "📄 ";
 
     const loading = utils.createEl("span", { className: "loading loading-dots" });
     const progress = utils.createEl("div", { 
       className: "radial-progress text-info", 
-      style: "display: none; --value:70; --size:1.3rem;" 
+      style: "display: none; --value:0; --size:1.3rem;" 
     });
     const statusText = utils.createEl("span", { className: "w-max text-[0.8rem] md:text-[1rem]" });
 
     const container = utils.createEl("div", 
-      { className: "flex flex-col gap-1 w-full p-2 mt-3 shadow-sm rounded-lg" },
+      { className: "flex flex-col gap-1 w-full p-2 mt-3 shadow-sm rounded-lg border border-base-200" },
       utils.createEl("div", { className: "flex w-full justify-between break-all items-center" },
         utils.createEl("h3", { 
           className: "text-[0.85rem] font-bold", 
           textContent: `${emoji}${cleanName} (${sizeStr})` 
         }),
-        utils.createEl("div", { className: "ml-auto pl-2 flex gap-2" }, loading, progress, statusText)
+        utils.createEl("div", { className: "ml-auto pl-2 flex gap-2 items-center" }, loading, progress, statusText)
       )
     );
 
@@ -191,8 +240,7 @@ class FileTransfer {
 
   updateUI(status) {
     const { loading, progress, statusText } = this.ui;
-
-    const setDisplay = (el, val) => el.style.display = val;
+    const setDisplay = (el, val) => { if (el) el.style.display = val; };
 
     switch (status) {
       case "pending":
@@ -202,24 +250,29 @@ class FileTransfer {
         break;
       case "sending":
         setDisplay(loading, "inline-block");
+        setDisplay(progress, "none");
         statusText.textContent = " sending";
+        setDisplay(statusText, "inline-block");
         break;
       case "completed":
         this.completionCount++;
         setDisplay(loading, "none");
         setDisplay(progress, "none");
         statusText.textContent = this.completionCount > 1 ? `${this.completionCount} times ✅` : "✅";
+        setDisplay(statusText, "inline-block");
         break;
       case "Canceled":
         setDisplay(loading, "none");
         setDisplay(progress, "none");
         statusText.textContent = "⚠️ canceled";
+        setDisplay(statusText, "inline-block");
         break;
       default: // Progress percentage
         setDisplay(loading, "none");
         setDisplay(progress, "inline-block");
         progress.style.setProperty("--value", status);
         statusText.textContent = ` ${status}%`;
+        setDisplay(statusText, "inline-block");
     }
   }
 
@@ -229,19 +282,21 @@ class FileTransfer {
         method: "POST",
         body: this.file,
         headers: {
-          "filename": utils.cleanFileName(this.file.name),
+          "filename": encodeURIComponent(utils.cleanFileName(this.file.name)),
           "filesize": this.file.size
         }
       });
       return await res.text();
     } catch (error) {
-      console.error("Upload failed", error);
+      console.error("Upload execution aborted:", error);
       return "Closed";
     }
   }
 }
 
 async function handleLiveShare() {
+  if (!targetDeviceId) return;
+
   DOM.fileInput.disabled = true;
   DOM.deviceSelect.disabled = true;
   connectedDevices.close();
@@ -251,7 +306,11 @@ async function handleLiveShare() {
   DOM.cancelBtn.style.display = "block";
 
   const controller = new ShareController(DOM.fileInput, deviceName, targetDeviceId);
-  await controller.start();
   
+  // BUG FIX: Wired up the unused Cancel Button reference so that 
+  // clicking the UI button actually invokes the termination sequence.
+  DOM.cancelBtn.onclick = () => controller.terminate();
+  
+  await controller.start();
   window.onbeforeunload = () => controller.terminate();
 }
