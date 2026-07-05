@@ -1,11 +1,11 @@
-# File Shifter — Node.js Local File Transfer & Relay Server
+# File Shifter — Node.js Local File Transfer & Relay Server (Learing Project! Still good for day to day use)
 
 [![Made with Node.js](https://img.shields.io/badge/Made%20with-Node.js-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-blue)](#)
 [![License: GPL](https://img.shields.io/badge/License-GPL-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Build-Stable-success)](#)
 
-File Shifter is a local web server for transferring and streaming files between devices on a LAN. It is implemented using only Node.js core modules and HTTP — no Express, no WebSocket libraries — and serves as an educational project to explore how request parsing, streaming, and related internals work.
+File Shifter is a local web server for transferring and streaming files between devices on a LAN. It is implemented using only Node.js core modules and HTTP — no Express, no WebSocket libraries — **and serves as an educational project** to explore how request parsing, streaming, and related internals work.
 
 ## Table of Contents
 - Features
