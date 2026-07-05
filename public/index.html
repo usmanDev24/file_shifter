@@ -1,16 +1,22 @@
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="/public/styles/main_styles.css" />
+    <!-- Tailwind and DaisyUI CDN for drop-in execution -->
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
     <title>Home</title>
   </head>
-  <body>
-    <div
-      class="flex flex-1 justify-between items-center-safe md:ml-12 md:mr-12 mb-2 border rounded-lg border-base-300 m-auto shadow-md"
-    >
-      <div class="w-[4rem]"></div>
-      <h1 class="text-xl lg:text-2xl p-2 ml-2 font-bold">
+  <body class="bg-base-100 text-base-content min-h-screen flex flex-col">
+    
+    <!-- Navbar Container -->
+    <div class="flex justify-between items-center mx-4 md:mx-12 mt-4 mb-2 border rounded-lg border-base-300 shadow-md bg-base-100 p-2">
+      <!-- Hidden spacer balancing the layout structure -->
+      <div class="w-[4rem] hidden sm:block"></div>
+      
+      <h1 class="text-xl lg:text-2xl p-2 font-bold text-center flex-1 sm:flex-none">
         <a href="/">File Shifter</a>
       </h1>
 
@@ -18,67 +24,74 @@
         <div
           role="button"
           tabindex="0"
-          class="btn btn-md lg:btn-lg btn-dash btn-ghost p-1 md:p-2 font-bold mr-2"
+          class="btn btn-sm md:btn-md btn-dash btn-ghost p-1 md:p-2 font-bold"
         >
           QR Code
         </div>
-        <ul
-          class="dropdown-content bg-base-100 border border-gray-500 rounded-lg w-48 z-10 p-2 m-4 mr-3"
-        >
-          <img src="/public/images/qrcode.svg" />
+        <ul tabindex="0" class="dropdown-content bg-base-100 border border-base-300 rounded-lg w-48 z-10 p-2 mt-2 shadow-lg">
+          <li>
+            <img src="/public/images/qrcode.svg" alt="QR Code Link" class="w-full h-auto bg-white p-1 rounded" />
+          </li>
         </ul>
       </div>
     </div>
-    <div
-      class="flex h-[calc(100vh-4rem)] flex-col pl-2 pr-2 md:pl-12 md:pr-12 gap-4 items-center-safe justify-center-safe"
-    >
-      <div class="card card-sm md:card:md lg:card-lg xl:card:xl bg-base-300">
+
+    <!-- Main Dynamic Viewport Frame -->
+    <div class="flex flex-1 min-h-[calc(100vh-7rem)] flex-col px-4 md:px-12 gap-6 items-center justify-center py-4">
+      
+      <!-- Central Action Panel Card -->
+      <div class="card card-compact sm:card-normal bg-base-300 border border-base-300/50 shadow-md max-w-4xl w-full">
         <div class="card-body items-center p-4 md:p-8">
-          <h2 class="card-title text-xl mt-3">Send and Recieve Files</h2>
-          <p
-            class="mt-3 text-lg text-[1rem] text-center alert alert-info alert-soft"
-          >
+          <h2 class="card-title text-xl md:text-2xl font-bold mt-2">Send and Receive Files</h2>
+          
+          <p class="mt-3 text-sm md:text-base text-center alert alert-info alert-soft leading-relaxed">
             Transfer files seamlessly between your devices over the same 🌐
-            Wi-Fi network, or through a mobile hotspot connection (e.g.,💻PC
-            connected to your 📱phone’s hotspot).
+            Wi-Fi network, or through a mobile hotspot connection (e.g., 💻 PC
+            connected to your 📱 phone’s hotspot).
           </p>
-          <p class="p-4 text-[.9rem] md:text-lg">
-            Device Name:
-            <span class="font-bold text-shadow-lg" id="name-div"></span
-            ><a
-              class="ml-2 mt-[-.1rem] cursor-pointer"
+          
+          <p class="p-4 text-base md:text-lg flex items-center justify-center gap-2">
+            <span>Device Name:</span>
+            <span class="font-bold text-primary" id="name-div">...</span>
+            <a
+              class="inline-block transition-transform hover:scale-110 active:scale-95 scale-x-[-1]"
               id="edit-name"
               href="/edit-device-name"
-              ><span style="display: inline-block; transform: scaleX(-1)"
-                >✏️</span
-              >
+              title="Edit Device Name"
+            >
+              ✏️
             </a>
           </p>
-          <div
-            class="flex flex-col justify-center-safe items-center-safe gap-3 mt-4"
-          >
+          
+          <!-- CTA Action Core Triggers -->
+          <div class="flex flex-col w-full items-center gap-3 mt-2">
             <a
-              class="btn btn-primary btn-md p-[.9rem] lg:btn-lg w-max"
+              class="btn btn-primary btn-md lg:btn-lg w-full sm:w-max min-w-[280px] text-center"
               href="/send-to-main-pc"
-              >📤 Directly Send To Main PC</a
             >
+              📤 Directly Send To Main PC
+            </a>
             <a
-              class="btn btn-primary  btn-md p-[.9rem] lg:btn-lg w-max"
+              class="btn btn-primary btn-md lg:btn-lg w-full sm:w-max min-w-[280px] text-center"
               href="/live-send"
-              >🔄 Send To Any Device (💻PC/📱Mobile)</a
             >
+              🔄 Send To Any Device (💻PC/📱Mobile)
+            </a>
             <a
-              class="btn btn-primary btn-md p-[.9rem] lg:btn-lg w-max"
+              class="btn btn-primary btn-md lg:btn-lg w-full sm:w-max min-w-[280px] text-center"
               href="/receive"
-              >📥 Receive</a
             >
+              📥 Receive
+            </a>
           </div>
         </div>
       </div>
-      <footer>
-        <p class="text-center text-sm opacity-80">
-          copywrite © 2025 Usman Ghani (<a
-            class="link-info"
+
+      <!-- App Copyright Standard Footer -->
+      <footer class="mt-auto pt-4">
+        <p class="text-center text-xs md:text-sm opacity-75">
+          Copyright © 2026 Usman Ghani (<a
+            class="link link-info font-medium"
             href="https://github.com/usmandev24"
             >usmandev24</a
           >)
@@ -86,8 +99,9 @@
       </footer>
     </div>
 
+    <!-- Interface Logic Integrations -->
     <script>
-      const deviceName = localStorage.getItem("deviceName");
+      const deviceName = localStorage.getItem("deviceName") || "Unknown Device";
       const nameDiv = document.getElementById("name-div");
       nameDiv.textContent = deviceName;
     </script>

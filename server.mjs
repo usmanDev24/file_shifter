@@ -85,8 +85,7 @@ server.on("listening", () => {
                 Welcome to seemless file sharing Web-App.
           Copyright (C) 2025 "USMAN GHANI" https://github.com/usmandev24
 -------------------------------------------------------------------------
-                                 
----> In this PC Enter http://localhost:${port} in browser.`);
+                                 `);
   if (!getIpv4()) {
     console.log(`
 *****    !!!  NO Network connected  ***********`);
@@ -98,7 +97,7 @@ server.on("listening", () => {
       .toString(`http://${getIpv4()}:4000`, { small: true, type: "terminal" })
       .then((q) => {
         console.log(`
----> On Other device Enter http://${getIpv4()}:${port} in browser.
+---> On Both devices Go To http://${getIpv4()}:${port} in browser.
 ---> OR  Scan QrCode:
 
 ${q}`);
